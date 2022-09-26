@@ -1,0 +1,33 @@
+----------------------configure------------------------
+general                  :                            {}
+phase                    :                         train
+fold                     :                             1
+name                     :                     brain_seg
+data_root                :../dataset/infant_brain_seg_reg/
+csv_root                 : ../csvfile/filelist_06_12.csv
+checkpoint_root          :                       ../runs
+save_pred_root           :                   pred_result
+datamode                 :                          IBIS
+preprocess               :                          crop
+crop_size                :                  [96, 96, 96]
+batch_size               :                             4
+resume_epoch             :                            -1
+continue_train           :                         False
+num_epoch                :                           300
+net_type                 :                          unet
+input_nc                 :                             3
+output_nc                :                             4
+lr                       :                         0.001
+save_frequency           :                            10
+val_frequency            :                            50
+model                    :                          proj
+-------------------------End---------------------------
+
+214
+dataset [IBISDataset] was created
+Initialize the network with [normal]
+model [ProjModel] was created
+----------------------Networks initialized-----------------------
+[Network seg] Total number of parameters: 9.918 M
+------------------------------------------------------------------
+Create the directories (log and train_visuals) to save the train results.

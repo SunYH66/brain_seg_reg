@@ -1,0 +1,6 @@
+dataset [IBISDataset] was created
+Initialize the network with [normal]
+model [ProjModel] was created
+----------------------Networks initialized-----------------------
+[Network seg] Total number of parameters: 9.918 M
+------------------------------------------------------------------
