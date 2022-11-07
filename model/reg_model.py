@@ -1,8 +1,12 @@
 # --coding:utf-8--
+import ants
 import torch
+import random
+import numpy as np
 from model import network
 from model.base_model import BaseModel
-from utils.loss import DiceLoss, ThreeDiceLoss, gradient_loss
+from data import random_sample, mask_sample
+from utils.loss import DiceLoss, ThreeDiceLoss, gradient_loss, to_one_hot
 # from monai.losses.dice import DiceLoss
 
 class RegModel(BaseModel):
@@ -10,8 +14,10 @@ class RegModel(BaseModel):
     def __init__(self, opt):
         super(RegModel, self).__init__(opt)
         self.model_name = ['reg']
+        self.optimizer_name = ['reg']
         self.loss_name = ['reg', 'grid', 'total']
-        self.visual_name = ['warped_seg', 'warped_ori']
+        self.visual_name = ['warped_seg', 'warped_ori', 'fix_seg', 'fix_ori']
+        self.path_name = ['fix_path', 'mov_path_1', 'mov_path_2'] #['fix_path', 'mov_path_1', 'mov_path_2'] ['fix_path', 'mov_path_1']
 
         # define networks
         if opt.phase == 'train' or opt.phase == 'val':
@@ -32,41 +38,39 @@ class RegModel(BaseModel):
         self.optimizer_reg = torch.optim.Adam(self.net_reg.parameters(), lr=opt.lr)
 
     def set_input(self, input_data):
-        self.img_06 = input_data['img_06'].to('cuda').float()
-        self.img_12 = input_data['img_12'].to('cuda').float()
-        self.img_24 = input_data['img_24'].to('cuda').float()
-        self.seg_06 = input_data['seg_06'].to('cuda').float()
-        self.seg_12 = input_data['seg_12'].to('cuda').float()
-        self.seg_24 = input_data['seg_24'].to('cuda').float()
-        self.img_06_path = input_data['img_06_path']
-        self.img_12_path = input_data['img_12_path']
-        self.img_24_path = input_data['img_24_path']
+        self.img_fix = input_data['img_fix'].to('cuda').float()
+        self.img_mov_1 = input_data['img_mov_1'].to('cuda').float()
+        self.img_mov_2 = input_data['img_mov_2'].to('cuda').float()
+        self.seg_fix = input_data['seg_fix'].to('cuda').float()
+        self.seg_mov_1 = input_data['seg_mov_1'].to('cuda').float()
+        self.seg_mov_2 = input_data['seg_mov_2'].to('cuda').float()
+        self.fix_path = input_data['img_path_fix']
+        self.mov_path_1 = input_data['img_path_mov_1']
+        self.mov_path_2 = input_data['img_path_mov_2']
 
-    def forward(self, opt):
+    def forward(self):
         # implement registration
-        self.fix_seg = torch.cat((self.seg_06, self.seg_06), dim=0)
-        self.mov_seg = torch.cat((self.seg_12, self.seg_24), dim=0)
-        self.mov_ori = torch.cat((self.img_12, self.img_24), dim=0)
+        self.fix_seg = torch.cat((to_one_hot(self.seg_fix), to_one_hot(self.seg_fix)), dim=0)
+        self.mov_seg = torch.cat((to_one_hot(self.seg_mov_1), to_one_hot(self.seg_mov_2)), dim=0)
+        self.fix_ori = torch.cat((self.img_fix, self.img_fix), dim=0)
+        self.mov_ori = torch.cat((self.img_mov_1, self.img_mov_2), dim=0)
 
-        # self.warped_seg, self.flow = self.net_reg(torch.cat((self.seg_12, self.seg_06), dim=1)) # TODO: change month for different reg modes
         self.warped_seg, self.flow = self.net_reg(torch.cat((self.mov_seg, self.fix_seg), dim=1)) # TODO: change month for different reg modes
         self.warped_ori = self.spa_tra(self.mov_ori, self.flow) # TODO: change month for different reg modes
-
 
     def optimize_train_parameters(self, count, opt):
         # forward()
         if count % opt.update_frequency == 0:
             # forward()
-            self.forward(opt)
+            self.forward()
 
             # Calculate registration loss
-            # self.loss_reg = self.loss_reg_criterion.forward(self.warped_seg, self.seg_06)
             self.loss_reg = self.loss_reg_criterion(self.warped_seg[0: opt.batch_size, ...],
                                                     self.warped_seg[opt.batch_size: 2 * opt.batch_size, ...],
-                                                    self.fix_seg[0: opt.batch_size, ...])
+                                                    self.fix_seg[0: opt.batch_size, ...].argmax(1).unsqueeze(1))
 
             # Calculate DVFs loss
-            self.loss_grid = opt.trade_off * self.loss_grid_criterion(self.flow)
+            self.loss_grid = opt.trade_off_reg * self.loss_grid_criterion(self.flow)
 
             # Calculate total loss
             self.loss_total = self.loss_reg + self.loss_grid
@@ -75,19 +79,26 @@ class RegModel(BaseModel):
             self.loss_total.backward()
             self.optimizer_reg.step()
 
+            # transfer results to one-channel results
+            self.fix_seg = self.fix_seg.argmax(1).unsqueeze(1)
+            self.warped_seg = self.warped_seg.argmax(1).unsqueeze(1)
+
 
     def optimize_val_parameters(self, opt):
         with torch.no_grad():
-            self.forward(opt)
+            self.forward()
 
             # Calculate registration loss
-            # self.loss_reg = self.loss_reg_criterion.forward(self.warped_seg, self.seg_06)
             self.loss_reg = self.loss_reg_criterion(self.warped_seg[0: opt.batch_size, ...],
                                                     self.warped_seg[opt.batch_size: 2 * opt.batch_size, ...],
-                                                    self.fix_seg[0: opt.batch_size, ...])
+                                                    self.fix_seg[0: opt.batch_size, ...].argmax(1).unsqueeze(1))
 
             # Calculate DVFs loss
-            self.loss_grid = opt.trade_off * self.loss_grid_criterion(self.flow)
+            self.loss_grid = opt.trade_off_reg * self.loss_grid_criterion(self.flow)
 
             # Calculate total loss
             self.loss_total = self.loss_reg + self.loss_grid
+
+            # transfer results to one-channel results
+            self.fix_seg = self.fix_seg.argmax(1).unsqueeze(1)
+            self.warped_seg = self.warped_seg.argmax(1).unsqueeze(1)

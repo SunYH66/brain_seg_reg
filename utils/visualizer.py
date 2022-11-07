@@ -6,7 +6,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 class Visualizer:
     def __init__(self, cfg):
-        self.visual_dir = os.path.join(cfg.checkpoint_root, cfg.name, 'visuals')
+        self.cfg = cfg
+        self.visual_dir = os.path.join(cfg.checkpoint_root, cfg.name, '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'visuals')
         mkdirs([self.visual_dir])
         self.writer = SummaryWriter(log_dir=self.visual_dir)
         self.writer.add_text('Experiment name:', text_string=cfg.name)
@@ -24,3 +25,9 @@ class Visualizer:
         for label, loss in losses.items():
             self.writer.add_scalar(label + aff_tag, loss, count)
         self.writer.flush()
+
+        if self.cfg.loss_verbose:
+            message = ''
+            for k, v in losses.items():
+                message += ' %s: %.3f  ' % (k, v)
+                print(message + '\n')  # print the message

@@ -4,13 +4,16 @@ import glob
 import shutil
 import imageio
 from PIL import Image
+# import ants
 import numpy as np
 import SimpleITK as sitk
 import pandas as pd
 from scipy.ndimage import zoom
 from config.config import cfg
-from sklearn.model_selection import KFold
+# from sklearn.model_selection import KFold
 from itertools import product
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 def resample_image(new_sapcing=(2,2,2)):
     """TODO: Resample image"""
@@ -134,6 +137,32 @@ def write_06_any_mo_to_csv():
     df = pd.DataFrame(dir_name_list, columns=['ID'])
     df.to_csv('../csvfile/filelist_06_any.csv')
 
+def jiameng_csv():
+    """TODO: find img ID that contains both 06 and 12 month images and write them to a csv file."""
+    file_list = sorted(glob.glob('/public_bme/home/liujm/Project/InfantSyn/data/*'))
+
+    dir_name_list = []
+    for i in file_list:
+        for j in file_list:
+            dir_name_list.append([os.path.basename(i), os.path.basename(j)])
+    df = pd.DataFrame(dir_name_list, columns=['ID_1', 'ID_2'])
+    df.to_csv('../csvfile/jiameng.csv')
+
+def jiameng_csv_2():
+    """TODO: find img ID that contains both 06 and 12 month images and write them to a csv file."""
+    file_list = sorted(glob.glob('/public_bme/home/liujm/Project/InfantSyn/data/*'))
+
+    dir_name_list = []
+    for path in file_list:
+        month_folder = os.listdir(path)
+        print(month_folder)
+        if '6mo' in month_folder and len(month_folder) >= 2:
+            dir_name = os.path.basename(path)
+            dir_name_list.append(dir_name)
+    print('all folder:', len(file_list))
+    print('06_any_folder:', len(dir_name_list))
+    df = pd.DataFrame(dir_name_list, columns=['ID'])
+    df.to_csv('../csvfile/jiameng2.csv')
 
 def write_valued_fileIDs_to_csv():
     """
@@ -230,7 +259,7 @@ def generate_csv():
     img_path = sorted(glob.glob('/data/infant_brain_seg_reg/*'))
     seg_path = sorted(glob.glob('/data/infant_brain_seg_reg/*'))
     file_index = np.arange(len(img_path))
-    kf = KFold(n_splits=5) # number of k-folds
+    # kf = KFold(n_splits=5) # number of k-folds
     fold = 1
     # if os.path.exists(csv_path):
     #     os.remove(csv_path)
@@ -284,7 +313,7 @@ def generate_csv():
 
 def settle_fold_ID():
     fold_ID = []
-    df = pd.read_csv('../csvfile/filelist_06_12_24.csv', index_col=False)
+    df = pd.read_csv('../csvfile/jiameng.csv', index_col=False)
     for i in range(df.shape[0]):
         if (i + 1) % 5 == 0:
             fold_ID.append(5)
@@ -301,7 +330,7 @@ def settle_fold_ID():
     # df.reset_index(drop=True)
     # df.reset_index(drop=True, inplace=True)
 
-    df.to_csv('../csvfile/filelist_06_12_24.csv', index=False)
+    df.to_csv('../csvfile/jiameng.csv', index=False)
 
 
 def remove_files():
@@ -359,8 +388,8 @@ def hyperparameters_loop():
         lr_policy_list = ['linear', 'step'])
     para_values = [v for v in parameters.values()]
 
-    for cfg.fold, cfg.crop_size, cfg.update_frequency, cfg.trade_off, cfg.lr_policy in product(*para_values):
-        print(cfg.fold, cfg.crop_size, cfg.update_frequency, cfg.trade_off, cfg.lr_policy)
+    for cfg.fold, cfg.crop_size, cfg.update_frequency, cfg.trade_off_reg, cfg.lr_policy in product(*para_values):
+        print(cfg.fold, cfg.crop_size, cfg.update_frequency, cfg.trade_off_reg, cfg.lr_policy)
 
 
 def create_gif():
@@ -428,5 +457,84 @@ def compute_value_from_csv():
         df.to_csv(file_path, index=False)
 
 
+def test():
+    import seaborn as sns
+    df = sns.load_dataset("penguins")
+    sns.pairplot(df, hue="species")
+    import matplotlib.pyplot as plt
+    plt.show()
+
+def _ants_img_info(img):
+    origin = img.origin
+    spacing = img.spacing
+    direction = img.direction
+
+    return img.numpy(), origin, spacing, direction
+
+
+def _resample(img, new_spacing, type='image'):
+    '''
+    function to normalize image to standard spacing
+    :param img: origin image
+    :param new_spacing: standard image spacing
+    :param type: image means linear interpolation, and seg denotes nearest interpolation
+    :return: resampled image
+    '''
+    assert type == 'image' or type == 'seg', 'type error, type expire to image or seg your type is:'.format(type)
+    origin, spacing, direction, data = _ants_img_info(img)
+    zoom_factory = np.array(spacing) / np.array(new_spacing)
+    if type == 'image':
+        zoomed_data = zoom(data, zoom_factory, order=3)
+    elif type == 'seg':
+        zoomed_data = zoom(data, zoom_factory, order=0)
+
+    return ants.from_numpy(zoomed_data, origin, new_spacing, direction)
+
+
+def _resize(img, target_size, type='image'):
+    img, origin, spacing, direction = _ants_img_info(img)
+    origin_size = img.shape
+    new_spacing = np.array(origin_size) * np.array(spacing) / np.array(target_size)
+    zoom_rate = np.array(target_size) / np.array(origin_size)
+    if type == 'image':
+        n_data = zoom(img, zoom_rate, order=3)
+    elif type == 'seg':
+        n_data = zoom(img, zoom_rate, order=1)
+    n_img = ants.from_numpy(n_data, origin=list(origin), spacing=list(new_spacing), direction=direction)
+    return n_img
+
+
+def count_tissue_volume():
+    """TODO: Calculate volume number of different tissues."""
+    img_path = ''
+    img = sitk.GetArrayFromImage(sitk.ReadImage(img_path))
+    for i in range(1, img.max()):
+        print(np.count_nonzero(img==i))
+
+def plot_line():
+    # csf = []
+    # gm = []
+    # wm = []
+    # img_paths = sorted(glob.glob(''))
+    # for path in img_paths:
+    #     img = sitk.GetArrayFromImage(sitk.ReadImage(path))
+    #     csf.append(np.count_nonzero(img==1))
+    #     gm.append(np.count_nonzero(img==2))
+    #     wm.append(np.count_nonzero(img==3))
+    fig, ax = plt.subplots()
+    # for i in range(1,4):
+    #     ax1 = plt.subplot(1,3,i, aspect='equal')
+    #     ax1.plot([1,2,3])
+    #     ax1.set_xticklabels(['06', '12', '24'])
+    ax.plot([1,2,3])
+    ax.set_ylabel('Volume ($\mathregular{cm^3}$)')
+    ax.set_xlabel('Timepoints')
+    ax.set_title('csf')
+    ax.set_xticks([0,1,2])
+    ax.set_xticklabels(['06', '12', '24'])
+    plt.show()
+
+
+
 if __name__ == '__main__':
-    create_gif()
+    jiameng_csv_2()

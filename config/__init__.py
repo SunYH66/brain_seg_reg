@@ -14,22 +14,22 @@ def print_configs(cfg):
 
     print(cfg_info)
 
-    if os.path.exists(os.path.join(cfg.checkpoint_root, cfg.name, 'model')):
+    if os.path.exists(os.path.join(cfg.checkpoint_root, cfg.name, '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'model')):
         print('Found non-empty checkpoint dir {}, \nenter {} to delete all files, {} to continue:'
-              .format(os.path.join(cfg.checkpoint_root, cfg.name, 'model'), '\'Yes\'', '\'No\''))
+              .format(os.path.join(cfg.checkpoint_root, cfg.name, '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'model'), '\'Yes\'', '\'No\''))
 
         choice = input().lower()
         if choice == 'yes':
-            shutil.rmtree(os.path.join(cfg.checkpoint_root, cfg.name, 'model'))
-            os.makedirs(os.path.join(cfg.checkpoint_root, cfg.name, 'model'))
+            shutil.rmtree(os.path.join(cfg.checkpoint_root, cfg.name, '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'model'))
+            os.makedirs(os.path.join(cfg.checkpoint_root, cfg.name, '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'model'))
         elif choice == 'no':
             pass
         else:
             raise ValueError('choice error')
     else:
-        os.makedirs(os.path.join(cfg.checkpoint_root, cfg.name, 'model'))
+        os.makedirs(os.path.join(cfg.checkpoint_root, cfg.name, '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'model'))
 
-    cfg_dir = os.path.join(cfg.checkpoint_root, cfg.name, 'log')
+    cfg_dir = os.path.join(cfg.checkpoint_root, cfg.name, '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'log')
     os.makedirs(cfg_dir, exist_ok=True)
     cfg_name = os.path.join(cfg_dir, 'cfg.txt')
     with open(cfg_name, 'w') as c_file:

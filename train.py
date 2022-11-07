@@ -27,7 +27,7 @@ if __name__ == '__main__':
     elif arg.platform == 'server':
         cfg.data_root = '/public_bme/home/sunyh/data/infant_brain_seg_reg'
         cfg.batch_size = 3
-        cfg.num_workers = 3
+        cfg.num_workers = 6
 
     # print and save configure
     print_configs(cfg)
@@ -60,8 +60,8 @@ if __name__ == '__main__':
             if (epoch * iter_num + i) % cfg.val_frequency == 0:
                 model.eval()
                 cfg.phase = 'val'
-                if os.path.exists(os.path.join(cfg.checkpoint_root, cfg.name, 'val')):
-                    shutil.rmtree(os.path.join(cfg.checkpoint_root, cfg.name, 'val'))
+                if os.path.exists(os.path.join(cfg.checkpoint_root, cfg.name, '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'val')):
+                    shutil.rmtree(os.path.join(cfg.checkpoint_root, cfg.name, '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'val'))
                 for j, val_data in enumerate(dataset.val_loader):
                     model.set_input(val_data)
                     model.optimize_val_parameters(cfg)

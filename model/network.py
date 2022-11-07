@@ -1,4 +1,5 @@
 # --coding:utf-8--
+from config.config import cfg
 import torch
 import torch.nn as nn
 from torch.nn import init
@@ -143,7 +144,7 @@ class InputTransition(nn.Module):
         :param out_channels: output feature channles
         """
         super(InputTransition, self).__init__()
-        self.conv1 = nn.Conv3d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv3d(in_channels=in_channels, out_channels=out_channels, kernel_size=(3, 3, 3), padding=1)
         self.bn1 = nn.BatchNorm3d(out_channels)
         self.activate1 = nn.ReLU(inplace=True)
 
@@ -164,10 +165,10 @@ class OutputTransition(nn.Module):
         super(OutputTransition, self).__init__()
         assert act == 'sigmoid' or act =='softmax', \
             'final activate layer should be sigmoid or softmax, current activate is :{}'.format(act)
-        self.conv1 = nn.Conv3d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv3d(in_channels=in_channels, out_channels=out_channels, kernel_size=(3, 3, 3), padding=1)
         self.bn1 = nn.BatchNorm3d(out_channels)
         self.activate1 = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv3d(in_channels=out_channels, out_channels=out_channels, kernel_size=1)
+        self.conv2 = nn.Conv3d(in_channels=out_channels, out_channels=out_channels, kernel_size=(1, 1, 1))
 
         self.softmax = nn.Softmax(dim=1)
         self.sigmoid = nn.Sigmoid()
@@ -194,7 +195,7 @@ class DownTransition(nn.Module):
         super(DownTransition, self).__init__()
 
         out_channels = in_channels * 2
-        self.down = nn.Conv3d(in_channels, out_channels, kernel_size=2, stride=2, groups=1)
+        self.down = nn.Conv3d(in_channels, out_channels, kernel_size=(2, 2, 2), stride=(2, 2, 2), groups=1)
         self.bn1 = nn.BatchNorm3d(out_channels)
         self.activate1 = nn.ReLU(inplace=True)
         self.residual = ResidualBlock(out_channels, out_channels, 3, 1, nums)
@@ -216,7 +217,7 @@ class UpTransition(nn.Module):
         :param nums: number of residual block
         """
         super(UpTransition, self).__init__()
-        self.conv1 = nn.ConvTranspose3d(in_channels, out_channels//2, kernel_size=2, stride=2, groups=1)
+        self.conv1 = nn.ConvTranspose3d(in_channels, out_channels//2, kernel_size=(2, 2, 2), stride=(2, 2, 2), groups=1)
         self.bn = nn.BatchNorm3d(out_channels//2)
         self.activate = nn.ReLU(inplace=True)
         self.residual = ResidualBlock(out_channels, out_channels, 3, 1, nums)
@@ -226,6 +227,21 @@ class UpTransition(nn.Module):
         out = torch.cat((out,skip_x), 1)
         out = self.residual(out)
 
+        return out
+
+
+class transformer_layer(nn.Module):
+    def __init__(self, nhead=8, batch_first=True, nhidden=512):
+        super(transformer_layer, self).__init__()
+        self.transformer = nn.Transformer(nhead=nhead, d_model=nhidden, dropout=True, batch_first=batch_first)
+
+    def forward(self, source, target):
+        BS, CS, WS, HS, DS = source.shape
+        BT, CT, WT, HT, DT = target.shape
+        source = source.reshape(BS, CS, WS*HS*DS)
+        target = target.reshape(BT, CT, WT*HT*DT)
+        out = self.transformer(source, target)
+        out = out.reshape(BT, CT, WT, HT, DT)
         return out
 
 
@@ -252,6 +268,13 @@ class SegNet(nn.Module):
         out64 = self.down_64(out32)
         out128 = self.down_128(out64)
         out256 = self.down_256(out128)
+
+        # out256_new = out256.clone()
+        # if cfg.batch_size < out256.size()[0]:
+        #     for i in range(cfg.batch_size):
+        #         out256_new[i:i+1, ...] = out256[i:i+1, ...] +\
+        #                                  out256[i+cfg.batch_size:i+cfg.batch_size+1, ...] +\
+        #                                  out256[i+cfg.batch_size*2:i+cfg.batch_size*2+1, ...]
 
         out = self.up_256(out256, out128)
         out = self.up_128(out, out64)
@@ -328,7 +351,7 @@ class unet_core(nn.Module):
         self.enc = nn.ModuleList()
         for i in range(len(enc_nf)):
             # TODO: change between 2 and 8 (segmentation probibality maps)
-            prev_nf = 2 if i == 0 else enc_nf[i - 1]
+            prev_nf = 8 if i == 0 else enc_nf[i - 1]
             self.enc.append(conv_block(dim, prev_nf, enc_nf[i], 2))
 
         # Decoder functions
@@ -341,7 +364,7 @@ class unet_core(nn.Module):
 
         if self.full_size:
             # TODO: change between 2 and 8 (segmentation probibality maps)
-            self.dec.append(conv_block(dim, dec_nf[4] + 2, dec_nf[5], 1))
+            self.dec.append(conv_block(dim, dec_nf[4] + 8, dec_nf[5], 1))
 
         if self.vm2:
             self.vm2_conv = conv_block(dim, dec_nf[5], dec_nf[6])

@@ -88,7 +88,8 @@ def save_image(image_obj, cfg, img_path, label=''):
                     if label == 'seg_output':
                         for i in range(0, int(img.size()[0] / 3)):
                             image_numpy = img.detach().cpu().numpy()
-                            save_path = os.path.join(cfg.checkpoint_root, cfg.name, 'val',
+                            save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                     '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'val',
                                                      img_path['img_06_path'][i].split('/')[-2],
                                                      img_path['img_06_path'][i].split('/')[-1])
                             if not os.path.exists(save_path):
@@ -98,7 +99,8 @@ def save_image(image_obj, cfg, img_path, label=''):
                                             os.path.join(save_path, label + '.nii.gz'))
                         for j in range(int(img.size()[0] / 3), 2 * int(img.size()[0] / 3)):
                             image_numpy = img.detach().cpu().numpy()
-                            save_path = os.path.join(cfg.checkpoint_root, cfg.name, 'val',
+                            save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                     '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'val',
                                                      img_path['img_12_path'][j - cfg.batch_size].split('/')[-2],
                                                      img_path['img_12_path'][j - cfg.batch_size].split('/')[-1])
                             if not os.path.exists(save_path):
@@ -108,7 +110,8 @@ def save_image(image_obj, cfg, img_path, label=''):
                                             os.path.join(save_path, label + '.nii.gz'))
                         for k in range(2 * int(img.size()[0] / 3), 3 * int(img.size()[0] / 3)):
                             image_numpy = img.detach().cpu().numpy()
-                            save_path = os.path.join(cfg.checkpoint_root, cfg.name, 'val',
+                            save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                     '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'val',
                                                      img_path['img_24_path'][k - cfg.batch_size * 2].split('/')[-2],
                                                      img_path['img_24_path'][k - cfg.batch_size * 2].split('/')[-1])
                             if not os.path.exists(save_path):
@@ -119,27 +122,41 @@ def save_image(image_obj, cfg, img_path, label=''):
                     elif label == 'warped_seg' or label == 'warped_ori':
                         for i in range(0, int(img.size()[0] / 2)):
                             image_numpy = img.detach().cpu().numpy()
-                            save_path = os.path.join(cfg.checkpoint_root, cfg.name, 'val',
-                                                     img_path['img_12_path'][i].split('/')[-2],
-                                                     img_path['img_12_path'][i].split('/')[-1])
+                            save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                     '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'val',
+                                                     img_path['mov_path_1'][i].split('/')[-2],
+                                                     img_path['mov_path_1'][i].split('/')[-1])
                             if not os.path.exists(save_path):
                                 os.makedirs(save_path)
                             sitk.WriteImage(sitk.GetImageFromArray(image_numpy[i, ...].squeeze().transpose((2, 1, 0))),
                                             os.path.join(save_path, label + '.nii.gz'))
                         for j in range(int(img.size()[0] / 2), 2 * int(img.size()[0] / 2)):
                             image_numpy = img.detach().cpu().numpy()
-                            save_path = os.path.join(cfg.checkpoint_root, cfg.name, 'val',
-                                                     img_path['img_24_path'][j - cfg.batch_size].split('/')[-2],
-                                                     img_path['img_24_path'][j - cfg.batch_size].split('/')[-1])
+                            save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                     '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'val',
+                                                     img_path['mov_path_2'][j - cfg.batch_size].split('/')[-2],
+                                                     img_path['mov_path_2'][j - cfg.batch_size].split('/')[-1])
                             if not os.path.exists(save_path):
                                 os.makedirs(save_path)
                             sitk.WriteImage(sitk.GetImageFromArray(image_numpy[j, ...].squeeze().transpose((2, 1, 0))),
+                                            os.path.join(save_path, label + '.nii.gz'))
+                    elif label == 'fix_ori' or label == 'fix_seg':
+                        for i in range(0, int(img.size()[0] / 2)):
+                            image_numpy = img.detach().cpu().numpy()
+                            save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                     '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'val',
+                                                     img_path['fix_path'][i].split('/')[-2],
+                                                     img_path['fix_path'][i].split('/')[-1])
+                            if not os.path.exists(save_path):
+                                os.makedirs(save_path)
+                            sitk.WriteImage(sitk.GetImageFromArray(image_numpy[i, ...].squeeze().transpose((2, 1, 0))),
                                             os.path.join(save_path, label + '.nii.gz'))
                 else: # only seg (or only reg)
                     for i in range(0, img.size()[0]):
                         image_numpy = img.detach().cpu().numpy()
                         # TODO: Change image paths for different months
-                        save_path = os.path.join(cfg.checkpoint_root, cfg.name, 'val',
+                        save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                 '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), 'val',
                                                  img_path['img_12_path'][i].split('/')[-2],
                                                  img_path['img_12_path'][i].split('/')[-1])
                         if not os.path.exists(save_path):
@@ -153,7 +170,8 @@ def save_image(image_obj, cfg, img_path, label=''):
                 if label == 'seg_output':
                     for i in range(0, int(image_obj.size()[0] / 3)):
                         image_numpy = image_obj.detach().cpu().numpy()
-                        save_path = os.path.join(cfg.checkpoint_root, cfg.name, cfg.test_folder,
+                        save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                 '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), cfg.test_folder,
                                                  img_path['img_06_path'][i].split('/')[-2],
                                                  img_path['img_06_path'][i].split('/')[-1])
                         if not os.path.exists(save_path):
@@ -163,7 +181,8 @@ def save_image(image_obj, cfg, img_path, label=''):
                             os.path.join(save_path, label + '.nii.gz'))
                     for j in range(int(image_obj.size()[0] / 3), 2 * int(image_obj.size()[0] / 3)):
                         image_numpy = image_obj.detach().cpu().numpy()
-                        save_path = os.path.join(cfg.checkpoint_root, cfg.name, cfg.test_folder,
+                        save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                 '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), cfg.test_folder,
                                                  img_path['img_12_path'][j - cfg.batch_size].split('/')[-2],
                                                  img_path['img_12_path'][j - cfg.batch_size].split('/')[-1])
                         if not os.path.exists(save_path):
@@ -173,7 +192,8 @@ def save_image(image_obj, cfg, img_path, label=''):
                             os.path.join(save_path, label + '.nii.gz'))
                     for k in range(2 * int(image_obj.size()[0] / 3), 3 * int(image_obj.size()[0] / 3)):
                         image_numpy = image_obj.detach().cpu().numpy()
-                        save_path = os.path.join(cfg.checkpoint_root, cfg.name, cfg.test_folder,
+                        save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                 '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), cfg.test_folder,
                                                  img_path['img_24_path'][k - cfg.batch_size * 2].split('/')[-2],
                                                  img_path['img_24_path'][k - cfg.batch_size * 2].split('/')[-1])
                         if not os.path.exists(save_path):
@@ -181,38 +201,71 @@ def save_image(image_obj, cfg, img_path, label=''):
                         sitk.WriteImage(sitk.GetImageFromArray(
                             image_numpy[k:k+1, ...].squeeze().transpose((2, 1, 0))),
                             os.path.join(save_path, label + '.nii.gz'))
-                elif label == 'warped_seg' or label == 'warped_ori':
+                elif 'warped' in label:
                     for i in range(0, int(image_obj.size()[0] / 2)):
                         image_numpy = image_obj.detach().cpu().numpy()
-                        save_path = os.path.join(cfg.checkpoint_root, cfg.name, cfg.test_folder,
-                                                 img_path['img_12_path'][i].split('/')[-2],
-                                                 img_path['img_12_path'][i].split('/')[-1])
+                        save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                 '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), cfg.test_folder,
+                                                 img_path['mov_path_1'][i].split('/')[-2],
+                                                 img_path['mov_path_1'][i].split('/')[-1])
                         if not os.path.exists(save_path):
                             os.makedirs(save_path)
                         sitk.WriteImage(sitk.GetImageFromArray(image_numpy[i:i+1, ...].squeeze().transpose((2, 1, 0))),
                                         os.path.join(save_path, label + '.nii.gz'))
                     for j in range(int(image_obj.size()[0] / 2), 2 * int(image_obj.size()[0] / 2)):
                         image_numpy = image_obj.detach().cpu().numpy()
-                        save_path = os.path.join(cfg.checkpoint_root, cfg.name, cfg.test_folder,
-                                                 img_path['img_24_path'][j - cfg.batch_size].split('/')[-2],
-                                                 img_path['img_24_path'][j - cfg.batch_size].split('/')[-1])
+                        save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                 '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), cfg.test_folder,
+                                                 img_path['mov_path_2'][j - cfg.batch_size].split('/')[-2],
+                                                 img_path['mov_path_2'][j - cfg.batch_size].split('/')[-1])
                         if not os.path.exists(save_path):
                             os.makedirs(save_path)
                         sitk.WriteImage(sitk.GetImageFromArray(image_numpy[j:j+1, ...].squeeze().transpose((2, 1, 0))),
                                         os.path.join(save_path, label + '.nii.gz'))
-            else: # only seg (or only reg)
-                for i in range(0, image_obj.size()[0]):
-                    image_numpy = image_obj.detach().cpu().numpy()
-                    # TODO: Change image paths for different months
-                    save_path = os.path.join(cfg.checkpoint_root, cfg.name, cfg.test_folder,
-                                             img_path['img_12_path'][i].split('/')[-2],
-                                             img_path['img_12_path'][i].split('/')[-1])
-                    if not os.path.exists(save_path):
-                        os.makedirs(save_path)
-                    sitk.WriteImage(sitk.GetImageFromArray(
-                        image_numpy[i:i+1, ...].squeeze().transpose((2, 1, 0))),
-                        os.path.join(save_path, label + '.nii.gz'))
+                elif 'fix' in label:
+                    for i in range(0, image_obj.size()[0]):
+                        image_numpy = image_obj.detach().cpu().numpy()
+                        # TODO: Change image paths for different months
+                        save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                 '{}'.format(
+                                                     cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder),
+                                                 cfg.test_folder,
+                                                 img_path['fix_path'][0].split('/')[-2],
+                                                 img_path['fix_path'][0].split('/')[-1])
+                        if not os.path.exists(save_path):
+                            os.makedirs(save_path)
+                        sitk.WriteImage(sitk.GetImageFromArray(
+                            image_numpy[i:i + 1, ...].squeeze().transpose((2, 1, 0))),
+                            os.path.join(save_path, label + '.nii.gz'))
 
+            else: # only seg (or only reg)
+                if 'warped' in label:
+                    for i in range(0, image_obj.size()[0]):
+                        image_numpy = image_obj.detach().cpu().numpy()
+                        # TODO: Change image paths for different months
+                        save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                 '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), cfg.test_folder,
+                                                 # img_path['fix_path'][i].split('/')[-2],
+                                                 img_path['mov_path_1'][i].split('/')[-2],
+                                                 img_path['mov_path_1'][i].split('/')[-1])
+                        if not os.path.exists(save_path):
+                            os.makedirs(save_path)
+                        sitk.WriteImage(sitk.GetImageFromArray(
+                            image_numpy[i:i+1, ...].squeeze().transpose((2, 1, 0))),
+                            os.path.join(save_path, label + '.nii.gz'))
+                elif 'fix' in label:
+                    for i in range(0, image_obj.size()[0]):
+                        image_numpy = image_obj.detach().cpu().numpy()
+                        # TODO: Change image paths for different months
+                        save_path = os.path.join(cfg.checkpoint_root, cfg.name,
+                                                 '{}'.format(cfg.reg_folder if cfg.model == 'reg' else cfg.seg_folder), cfg.test_folder,
+                                                 img_path['fix_path'][0].split('/')[-2],
+                                                 img_path['fix_path'][0].split('/')[-1])
+                        if not os.path.exists(save_path):
+                            os.makedirs(save_path)
+                        sitk.WriteImage(sitk.GetImageFromArray(
+                            image_numpy[i:i+1, ...].squeeze().transpose((2, 1, 0))),
+                            os.path.join(save_path, label + '.nii.gz'))
 
 def multi_layer_dice_coefficient(source, target, ep=1e-8):
     """TODO: functions to calculate dice coefficient of multi class
@@ -222,7 +275,6 @@ def multi_layer_dice_coefficient(source, target, ep=1e-8):
     :return: vector of dice coefficient
     """
     class_num = int(target.max()+1)
-
     source = source.astype(int)
     source = np.eye(class_num)[source]
     source = source[:,:,:,1:]

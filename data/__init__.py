@@ -78,6 +78,10 @@ def random_sample(img, patch_size):
     :param patch_size: crop size of extracted patch
     :return: random cropped image patch with exact size
     """
+    # transer tensor datatype to ndarray
+    if isinstance(img, torch.Tensor):
+        img = img.detach().cpu().numpy()
+
     # get maximum index and random get selected data
     max_pos = img.shape[2:]
 
@@ -108,6 +112,10 @@ def mask_sample(img, patch_size):
     :param patch_size: crop size of extracted patch
     :return: cropped image by mask and exact size
     """
+    # transer tensor datatype to ndarray
+    if isinstance(img, torch.Tensor):
+        img = img.detach().cpu().numpy()
+
     max_pos = img.shape[2:]
 
     # get potential exists center point within mask area
