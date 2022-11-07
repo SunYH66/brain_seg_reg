@@ -55,7 +55,89 @@ class ProjModel(BaseModel):
         self.warped_ori_12_24 = input_data['warped_ori_12_24'].to('cuda').float()
 
     def forward(self, opt):
+        """
+        # implement segmentation
+        self.seg_output = self.net_seg(torch.cat((self.img_06, self.img_12,
+                                                  self.img_24), dim=0))
+        """
+        """
+        # implement registration
+        self.fix_seg_06 = self.seg_output[0: opt.batch_size, ...].float()#.argmax(1).unsqueeze(1).float()
+        self.mov_seg_12 = self.seg_output[opt.batch_size: 2 * opt.batch_size, ...].float()#.argmax(1).unsqueeze(1).float()
+        self.mov_seg_24 = self.seg_output[2 * opt.batch_size: 3 * opt.batch_size, ...].float()#.argmax(1).unsqueeze(1).float()
+        self.fix_seg = torch.cat((self.fix_seg_06, self.fix_seg_06), dim=0)
+        self.mov_seg = torch.cat((self.mov_seg_12, self.mov_seg_24), dim=0)
+        self.mov_ori = torch.cat((self.img_12, self.img_24), dim=0)
+        """
+        """
+        # implement registration
+        self.fix_seg = torch.cat((to_one_hot(self.seg_06), to_one_hot(self.seg_06)), dim=0)
+        self.mov_seg = torch.cat((to_one_hot(self.seg_12), to_one_hot(self.seg_24)), dim=0)
+        self.mov_ori = torch.cat((self.img_12, self.img_24), dim=0)
+        self.warped_seg, self.flow = self.net_reg(torch.cat((self.mov_seg, self.fix_seg), dim=1))
+        self.warped_ori = self.spa_tra(self.mov_ori, self.flow)
+        """
+        """
+        # implement segmentation
+        self.seg_output = self.net_seg(torch.cat((self.img_24, self.warped_ori.detach()), dim=0))
+        """
+        """
+        # implement registration (pretrained)
+        self.load_reg_model(opt)
+        # 06 month registration
+        self.fix_seg = torch.cat((to_one_hot(self.seg_06), to_one_hot(self.seg_06)), dim=0)
+        self.mov_seg = torch.cat((to_one_hot(self.seg_12), to_one_hot(self.seg_24)), dim=0)
+        self.mov_ori = torch.cat((self.img_12, self.img_24), dim=0)
 
+        self.warped_seg, self.flow = self.net_reg(torch.cat((self.mov_seg, self.fix_seg), dim=1))
+        self.warped_ori = self.spa_tra(self.mov_ori, self.flow)
+        self.warped_ori_12_06 = self.warped_ori[0:1, ...]
+        self.warped_ori_24_06 = self.warped_ori[1:2, ...]
+
+        # 12 month registration
+        self.fix_seg = torch.cat((to_one_hot(self.seg_12), to_one_hot(self.seg_12)), dim=0)
+        self.mov_seg = torch.cat((to_one_hot(self.seg_06), to_one_hot(self.seg_24)), dim=0)
+        self.mov_ori = torch.cat((self.img_06, self.img_24), dim=0)
+
+        self.warped_seg, self.flow = self.net_reg(torch.cat((self.mov_seg, self.fix_seg), dim=1))
+        self.warped_ori = self.spa_tra(self.mov_ori, self.flow)
+        self.warped_ori_06_12 = self.warped_ori[0:1, ...]
+        self.warped_ori_24_12 = self.warped_ori[1:2, ...]
+
+        # 24 month registration
+        self.fix_seg = torch.cat((to_one_hot(self.seg_24), to_one_hot(self.seg_24)), dim=0)
+        self.mov_seg = torch.cat((to_one_hot(self.seg_06), to_one_hot(self.seg_12)), dim=0)
+        self.mov_ori = torch.cat((self.img_06, self.img_12), dim=0)
+
+        self.warped_seg, self.flow = self.net_reg(torch.cat((self.mov_seg, self.fix_seg), dim=1))
+        self.warped_ori = self.spa_tra(self.mov_ori, self.flow)
+        self.warped_ori_06_24 = self.warped_ori[0:1, ...]
+        self.warped_ori_12_24 = self.warped_ori[1:2, ...]
+
+        # generate image patch for segmentation
+        img = torch.cat((self.img_06, self.img_12, self.img_24,
+                        self.seg_06, self.seg_12, self.img_24,
+                        self.warped_ori_12_06, self.warped_ori_24_06,
+                        self.warped_ori_06_12, self.warped_ori_24_12,
+                        self.warped_ori_06_24, self.warped_ori_12_24), dim=0)
+        if random.random() > 0.2:
+            img = mask_sample(img, self.opt.crop_size)
+        else:
+            img = random_sample(img, self.opt.crop_size)
+
+        self.img_06 = torch.from_numpy(img[0:1, ...]).to('cuda').float()
+        self.img_12 = torch.from_numpy(img[1:2, ...]).to('cuda').float()
+        self.img_24 = torch.from_numpy(img[2:3, ...]).to('cuda').float()
+        self.seg_06 = torch.from_numpy(img[3:4, ...]).to('cuda').float()
+        self.seg_12 = torch.from_numpy(img[4:5, ...]).to('cuda').float()
+        self.seg_24 = torch.from_numpy(img[5:6, ...]).to('cuda').float()
+        self.warped_ori_12_06 = torch.from_numpy(img[6:7, ...]).to('cuda').float()
+        self.warped_ori_24_06 = torch.from_numpy(img[7:8, ...]).to('cuda').float()
+        self.warped_ori_06_12 = torch.from_numpy(img[8:9, ...]).to('cuda').float()
+        self.warped_ori_24_12 = torch.from_numpy(img[9:10, ...]).to('cuda').float()
+        self.warped_ori_06_24 = torch.from_numpy(img[10:11, ...]).to('cuda').float()
+        self.warped_ori_12_24 = torch.from_numpy(img[11:12, ...]).to('cuda').float()
+        """
         # implement segmentation
         self.seg_output = self.net_seg(torch.cat((self.img_06, self.img_12, self.img_24), dim=0))
         self.seg_warped_12_06 = self.net_seg(self.warped_ori_12_06)
