@@ -2,19 +2,18 @@
 import torch
 from brain_reg_seg.model import network
 from brain_reg_seg.model.base_model import BaseModel
-from brain_reg_seg.utils.loss import FocalLoss
 from monai.losses.dice import DiceLoss
-from monai.inferers import SlidingWindowInferer
+from brain_reg_seg.utils.loss import FocalLoss
 
-class SegModel(BaseModel):
+class SegWarpModel(BaseModel):
     """TODO: Build up IBIS segmentation model."""
     def __init__(self, opt):
-        super(SegModel, self).__init__(opt)
+        super(SegWarpModel, self).__init__(opt)
         self.model_name = ['seg']
         self.optimizer_name = ['seg']
         self.loss_name = ['seg']
         self.visual_name = ['seg_output']
-        self.path_name = ['img_path_main']
+        self.path_name = ['img_path']
 
         # define networks
         self.net_seg = network.define_network(opt.input_nc, opt.output_nc, opt.seg_net_type, opt.seg_train_mode, opt.crop_size)
@@ -33,23 +32,17 @@ class SegModel(BaseModel):
         self.img = input_data['img'].to('cuda').float()
         self.seg = input_data['seg'].to('cuda').float()
         self.GT = self.seg
-        self.img_path_main = input_data['img_path']
+        self.img_path = input_data['img_path']
 
 
-    def forward_train(self, opt):
+    def forward(self, opt):
         # implement segmentation
         self.seg_output = self.net_seg(self.img)
-        self.seg_output = torch.cat(([self.seg_output[i] for i in range(len(self.seg_output))]), dim=0)
 
-    def forward_val(self, opt):
-        # define sliding window inference object
-        inferer = SlidingWindowInferer(opt.crop_size, overlap=0.25)
-        self.seg_output = inferer(self.img, self.net_seg)
-        self.seg_output = torch.cat(([self.seg_output[i] for i in range(len(self.seg_output))]), dim=0)
 
     def optimize_train_parameters(self, epoch, opt):
         # forward()
-        self.forward_train(opt)
+        self.forward(opt)
 
         # Calculate segmentation loss
         self.loss_seg = self.loss_seg_criterion_dice.forward(self.seg_output, self.seg) + \
@@ -65,7 +58,7 @@ class SegModel(BaseModel):
     def optimize_val_parameters(self, opt):
         with torch.no_grad():
             # forward()
-            self.forward_val(opt)
+            self.forward(opt)
 
             # Calculate segmentation loss
             self.loss_seg = self.loss_seg_criterion_dice.forward(self.seg_output, self.seg) + \

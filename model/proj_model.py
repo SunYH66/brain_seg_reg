@@ -1,178 +1,143 @@
 # --coding:utf-8--
 import torch
-from model import network
-from model.base_model import BaseModel
-from utils.loss import FocalLoss, ThreeDiceLoss, gradient_loss
+from brain_reg_seg.model import network
+from brain_reg_seg.model.base_model import BaseModel
+from brain_reg_seg.utils.loss import FocalLoss
 from monai.losses.dice import DiceLoss
-
+from monai.inferers import SlidingWindowInferer
 
 class ProjModel(BaseModel):
     """TODO: Build up IBIS segmentation and registration model."""
     def __init__(self, opt):
         super(ProjModel, self).__init__(opt)
-        self.model_name = ['seg', 'reg']
-        self.optimizer_name = ['seg', 'reg']
-        self.loss_name = ['seg', 'reg', 'grid', 'total']
-        self.visual_name = ['seg_output', 'warped_seg', 'warped_ori']
+        self.model_name = ['seg']
+        self.optimizer_name = ['seg']
+        self.loss_name = ['seg_main', 'seg_consist1', 'seg_consist2', 'total'] #if opt.seg_train_mode != 'fusion_seg' else ['seg_main', 'seg_help1', 'seg_help2', 'seg_consist1', 'seg_consist2', 'total']
+        self.visual_name = ['seg_output']
+        self.path_name = ['img_path_main', 'warped_ori_path_help_1', 'warped_ori_path_help_2']
 
         # define networks
-        if opt.phase == 'train' or opt.phase == 'val':
-            self.net_seg = network.define_network(opt.input_nc, opt.output_nc, opt.seg_net_type, opt.crop_size)
-            self.net_reg = network.define_network(opt.input_nc, opt.output_nc, opt.reg_net_type, opt.crop_size)
-        elif opt.phase == 'test':
-            self.net_seg = network.define_network(opt.input_nc, opt.output_nc, opt.seg_net_type, opt.ori_size)
-            self.net_reg = network.define_network(opt.input_nc, opt.output_nc, opt.reg_net_type, opt.ori_size)
-
-        # define Spatial Transformer (spa_tra)
-        self.spa_tra = network.SpatialTransformer(opt.crop_size)
-        self.spa_tra.to('cuda')
+        # 06 month for feature fusion
+        if '{:02d}mo'.format(self.mo_list[0]) == '06mo':
+            if opt.phase == 'train' or opt.phase == 'val':
+                self.net_seg = network.define_network(opt.input_nc, opt.output_nc, opt.seg_net_type, 'fusion_only', opt.crop_size, opt.seg_fusion)
+            elif opt.phase == 'test':
+                self.net_seg = network.define_network(opt.input_nc, opt.output_nc, opt.seg_net_type, 'fusion_only', opt.ori_size, opt.seg_fusion)
+        else:
+            if opt.phase == 'train' or opt.phase == 'val':
+                self.net_seg = network.define_network(opt.input_nc, opt.output_nc, opt.seg_net_type, 'single', opt.crop_size)
+            elif opt.phase == 'test':
+                self.net_seg = network.define_network(opt.input_nc, opt.output_nc, opt.seg_net_type, 'single', opt.ori_size)
 
         # define loss
         self.loss_seg_criterion_dice = DiceLoss(to_onehot_y=True)
         self.loss_seg_criterion_focal = FocalLoss(class_num=4)
-        self.loss_reg_criterion = ThreeDiceLoss()
-        self.loss_grid_criterion = gradient_loss()
 
         # define optimizer
         self.optimizer_seg = torch.optim.Adam(self.net_seg.parameters(), lr=opt.lr)
-        self.optimizer_reg = torch.optim.Adam(self.net_reg.parameters(), lr=opt.lr)
+
 
     def set_input(self, input_data):
-        self.img_06 = input_data['img_06'].to('cuda').float()
-        self.img_12 = input_data['img_12'].to('cuda').float()
-        self.img_24 = input_data['img_24'].to('cuda').float()
-        self.seg_06 = input_data['seg_06'].to('cuda').float()
-        self.seg_12 = input_data['seg_12'].to('cuda').float()
-        self.seg_24 = input_data['seg_24'].to('cuda').float()
-        self.img_06_path = input_data['img_06_path']
-        self.img_12_path = input_data['img_12_path']
-        self.img_24_path = input_data['img_24_path']
+        self.img_main = input_data['img_main'].to('cuda').float()
+        self.seg_main = input_data['seg_main'].to('cuda').float()
+        self.GT = self.seg_main
 
-    def forward_seg_reg(self, opt):
+        self.warped_ori_help_1 = input_data['warped_ori_help_1'].to('cuda').float()
+        self.warped_seg_help_1 = input_data['warped_seg_help_1'].to('cuda').float()
+
+        self.warped_ori_help_2 = input_data['warped_ori_help_2'].to('cuda').float()
+        self.warped_seg_help_2 = input_data['warped_seg_help_2'].to('cuda').float()
+
+        self.img_path_main = input_data['img_path_main']
+        self.warped_ori_path_help_1 = input_data['warped_ori_path_help_1']
+        self.warped_ori_path_help_2 = input_data['warped_ori_path_help_2']
+
+
+    def forward_train(self, opt):
         # implement segmentation
-        self.seg_output = self.net_seg(torch.cat((self.img_06, self.img_12,
-                                                  self.img_24), dim=0))
-
-        # implement registration
-        self.fix_seg_06 = self.seg_output[0: opt.batch_size, ...].float()#.argmax(1).unsqueeze(1).float()
-        self.mov_seg_12 = self.seg_output[opt.batch_size: 2 * opt.batch_size, ...].float()#.argmax(1).unsqueeze(1).float()
-        self.mov_seg_24 = self.seg_output[2 * opt.batch_size: 3 * opt.batch_size, ...].float()#.argmax(1).unsqueeze(1).float()
-        self.fix_seg = torch.cat((self.fix_seg_06, self.fix_seg_06), dim=0)
-        self.mov_seg = torch.cat((self.mov_seg_12, self.mov_seg_24), dim=0)
-        self.mov_ori = torch.cat((self.img_12, self.img_24), dim=0)
+        self.seg_output = self.net_seg(torch.cat((self.img_main, self.warped_ori_help_1, self.warped_ori_help_2), dim=1))
+        # self.seg_output = torch.cat(([self.seg_output[i] for i in range(len(self.seg_output))]), dim=0)
 
 
-        self.warped_seg, self.flow = self.net_reg(torch.cat((self.mov_seg, self.fix_seg), dim=1))
-        self.warped_ori = self.spa_tra(self.mov_ori, self.flow)
-
-    def forward_seg(self, opt):
-        # implement segmentation
-        self.seg_output = self.net_seg(torch.cat((self.img_06, self.img_12,
-                                                  self.img_24), dim=0))
+    def forward_val(self, opt):
+        # define sliding window inference object
+        inferer = SlidingWindowInferer(opt.crop_size, overlap=0.25)
+        self.seg_output = inferer(torch.cat((self.img_main, self.warped_ori_help_1, self.warped_ori_help_2), dim=1), self.net_seg)
+        # self.seg_output = torch.cat(([self.seg_output[i] for i in range(len(self.seg_output))]), dim=0)
 
 
     def optimize_train_parameters(self, count, opt):
-        if count % opt.update_frequency == 0:
-            # forward()
-            self.forward_seg_reg(opt)
+        # forward()
+        self.forward_train(opt)
 
-            # Calculate segmentation loss
-            target = torch.cat((self.seg_06, self.seg_12, self.seg_24), dim=0)
-            self.loss_seg = self.loss_seg_criterion_dice.forward(self.seg_output, target) + \
-                            10 * self.loss_seg_criterion_focal(self.seg_output, target)
+        # Calculate segmentation loss (target should be one-channel)
+        self.loss_seg_main = self.loss_seg_criterion_dice.forward(self.seg_output, self.seg_main) + \
+                             10 * self.loss_seg_criterion_focal(self.seg_output, self.seg_main)
 
-            # Calculate registration loss
-            self.loss_reg = self.loss_reg_criterion(self.warped_seg[0: opt.batch_size, ...],
-                                                    self.warped_seg[opt.batch_size: 2 * opt.batch_size, ...],
-                                                    self.fix_seg[0: opt.batch_size, ...].argmax(1).unsqueeze(1))
+        self.loss_seg_consist1 = self.loss_seg_criterion_dice.forward(self.seg_output, self.warped_seg_help_1) + \
+                              10 * self.loss_seg_criterion_focal(self.seg_output, self.warped_seg_help_1)
+        self.loss_seg_consist2 = self.loss_seg_criterion_dice.forward(self.seg_output, self.warped_seg_help_2) + \
+                              10 * self.loss_seg_criterion_focal(self.seg_output, self.warped_seg_help_2)
 
-            # Calculate DVFs loss
-            self.loss_grid = opt.trade_off * self.loss_grid_criterion(self.flow)
+        self.loss_total = self.loss_seg_main + opt.seg_trade_off * self.loss_seg_consist1 + opt.seg_trade_off * self.loss_seg_consist2
 
-            # Calculate total loss
-            self.loss_total = self.loss_seg + self.loss_reg + self.loss_grid
 
-            # transfer results to one-channel results
-            self.seg_output = self.seg_output.argmax(1).unsqueeze(1)
-            self.warped_seg = self.warped_seg.argmax(1).unsqueeze(1)
+        if opt.seg_train_mode == 'fusion_seg':
+            self.loss_seg_help1 = self.loss_seg_criterion_dice.forward(self.seg_output[opt.batch_size:2*opt.batch_size, ...], self.warped_seg_help_1) + \
+                                  10 * self.loss_seg_criterion_focal(self.seg_output[opt.batch_size:2*opt.batch_size, ...], self.warped_seg_help_1)
+            self.loss_seg_help2 = self.loss_seg_criterion_dice.forward(self.seg_output[2*opt.batch_size:3*opt.batch_size, ...], self.warped_seg_help_2) + \
+                                  10 * self.loss_seg_criterion_focal(self.seg_output[2*opt.batch_size:3*opt.batch_size, ...], self.warped_seg_help_2)
+            self.loss_seg_consist1 = self.loss_seg_criterion_dice.forward(self.seg_output[0:opt.batch_size, ...],
+                                                                          self.seg_output[opt.batch_size:2*opt.batch_size, ...].argmax(1).unsqueeze(1))
+            self.loss_seg_consist2 = self.loss_seg_criterion_dice.forward(self.seg_output[0:opt.batch_size, ...],
+                                                                          self.seg_output[2*opt.batch_size:3*opt.batch_size, ...].argmax(1).unsqueeze(1))
 
-            self.set_requires_grad(self.net_reg, True)
-            self.optimizer_seg.zero_grad()
-            self.optimizer_reg.zero_grad()
-            self.loss_total.backward()
-            self.optimizer_seg.step()
-            self.optimizer_reg.step()
+            self.loss_total = self.loss_total + self.loss_seg_help1 + self.loss_seg_help2 +\
+                              opt.seg_trade_off * self.loss_seg_consist1 + opt.seg_trade_off * self.loss_seg_consist2
 
-            del self.fix_seg_06, self.mov_seg_12, self.mov_seg_24,\
-                self.fix_seg, self.mov_seg, self.mov_ori
+        # Transfer results to one-channel results
+        self.seg_output = self.seg_output.argmax(1).unsqueeze(1)
 
-        else:
-            self.forward_seg(opt)
+        # Backward
+        self.optimizer_seg.zero_grad()
 
-            # Calculate segmentation loss
-            target = torch.cat((self.seg_06, self.seg_12, self.seg_24), dim=0)
-            self.loss_seg = self.loss_seg_criterion_dice.forward(self.seg_output, target) + \
-                            10 * self.loss_seg_criterion_focal(self.seg_output, target)
+        self.loss_total.backward()
 
-            # transfer results to one-channel results
-            self.seg_output = self.seg_output.argmax(1).unsqueeze(1)
+        self.optimizer_seg.step()
 
-            self.set_requires_grad(self.net_reg, False)
-            self.optimizer_seg.zero_grad()
-            self.loss_seg.backward()
-            self.optimizer_seg.step()
-
-        # self.forward_seg_reg(opt)
-        # # Calculate segmentation loss
-        # target = torch.cat((self.seg_06, self.seg_12, self.seg_24), dim=0)
-        # self.loss_seg = self.loss_seg_criterion_dice.forward(self.seg_output, target) + \
-        #                 10 * self.loss_seg_criterion_focal(self.seg_output, target)
-        #
-        # # Calculate registration loss
-        # self.loss_reg = self.loss_reg_criterion(self.warped_seg[0: opt.batch_size, ...],
-        #                                         self.warped_seg[opt.batch_size: 2 * opt.batch_size, ...],
-        #                                         self.fix_seg[0: opt.batch_size, ...].argmax(1).unsqueeze(1))
-        #
-        # # Calculate DVFs loss
-        # self.loss_grid = opt.trade_off * self.loss_grid_criterion(self.flow)
-        #
-        # # Calculate total loss
-        # self.loss_total = self.loss_seg + self.loss_reg + self.loss_grid
-        # print('Before backpropagation seg parameter:', next(self.net_seg.parameters())[0, 0, 0, 0, 0])
-        # print('Before backpropagation reg parameter:', next(self.net_reg.parameters())[0, 0, 0, 0, 0])
-        # self.optimizer_seg.zero_grad()
-        # self.optimizer_reg.zero_grad()
-        # self.loss_reg.backward()
-        # self.optimizer_seg.step()
-        # self.optimizer_reg.step()
-        # print('After backpropagation seg parameter:', next(self.net_seg.parameters())[0, 0, 0, 0, 0])
-        # print('After backpropagation reg parameter:', next(self.net_reg.parameters())[0, 0, 0, 0, 0])
-        # print('aaa')
 
     def optimize_val_parameters(self, opt):
         with torch.no_grad():
             # forward()
-            self.forward_seg_reg(opt)
+            self.forward_val(opt)
 
-            # Calculate segmentation loss
-            target = torch.cat((self.seg_06, self.seg_12, self.seg_24), dim=0)
-            self.loss_seg = self.loss_seg_criterion_dice.forward(self.seg_output, target) + \
-                            10 * self.loss_seg_criterion_focal(self.seg_output, target)
+            # Calculate segmentation loss (target should be one-channel)
+            self.loss_seg_main = self.loss_seg_criterion_dice.forward(self.seg_output[0:opt.batch_size, ...], self.seg_main) + \
+                                 10 * self.loss_seg_criterion_focal(self.seg_output[0:opt.batch_size, ...], self.seg_main)
+            self.loss_seg_consist1 = self.loss_seg_criterion_dice.forward(self.seg_output[0:opt.batch_size, ...],
+                                                                          self.warped_seg_help_1) + \
+                                     10 * self.loss_seg_criterion_focal(self.seg_output[0:opt.batch_size, ...],
+                                                                        self.warped_seg_help_1)
+            self.loss_seg_consist2 = self.loss_seg_criterion_dice.forward(self.seg_output[0:opt.batch_size, ...],
+                                                                          self.warped_seg_help_2) + \
+                                     10 * self.loss_seg_criterion_focal(self.seg_output[0:opt.batch_size, ...],
+                                                                        self.warped_seg_help_2)
 
-            # Calculate registration loss
-            self.loss_reg = self.loss_reg_criterion(self.warped_seg[0: opt.batch_size, ...],
-                                                    self.warped_seg[opt.batch_size: 2 * opt.batch_size, ...],
-                                                    self.fix_seg[0: opt.batch_size, ...].argmax(1).unsqueeze(1))
+            self.loss_total = self.loss_seg_main + opt.seg_trade_off * self.loss_seg_consist1 + opt.seg_trade_off * self.loss_seg_consist2
 
-            # Calculate DVFs loss
-            self.loss_grid = opt.trade_off * self.loss_grid_criterion(self.flow)
+            if opt.seg_train_mode == 'fusion_seg':
+                self.loss_seg_help1 = self.loss_seg_criterion_dice.forward(self.seg_output[opt.batch_size:2 * opt.batch_size, ...], self.warped_seg_help_1) + \
+                                      10 * self.loss_seg_criterion_focal(self.seg_output[opt.batch_size:2 * opt.batch_size, ...], self.warped_seg_help_1)
+                self.loss_seg_help2 = self.loss_seg_criterion_dice.forward(self.seg_output[2 * opt.batch_size:3 * opt.batch_size, ...], self.warped_seg_help_2) + \
+                                      10 * self.loss_seg_criterion_focal(self.seg_output[2 * opt.batch_size:3 * opt.batch_size, ...], self.warped_seg_help_2)
+                self.loss_seg_consist1 = self.loss_seg_criterion_dice.forward(self.seg_output[0:opt.batch_size, ...],
+                                                                              self.seg_output[opt.batch_size:2*opt.batch_size, ...].argmax(1).unsqueeze(1))
+                self.loss_seg_consist2 = self.loss_seg_criterion_dice.forward(self.seg_output[0:opt.batch_size, ...],
+                                                                              self.seg_output[2*opt.batch_size:3*opt.batch_size, ...].argmax(1).unsqueeze(1))
 
-            # Calculate total loss
-            self.loss_total = self.loss_seg + self.loss_reg + self.loss_grid
+                self.loss_total = self.loss_total + self.loss_seg_help1 + self.loss_seg_help2 +\
+                                  opt.seg_trade_off * self.loss_seg_consist1 + opt.seg_trade_off * self.loss_seg_consist2
 
-            # transfer results to one-channel results
+            # Transfer results to one-channel results
             self.seg_output = self.seg_output.argmax(1).unsqueeze(1)
-            self.warped_seg = self.warped_seg.argmax(1).unsqueeze(1)
 
-            del self.fix_seg_06, self.mov_seg_12, self.mov_seg_24,\
-                self.fix_seg, self.mov_seg, self.mov_ori

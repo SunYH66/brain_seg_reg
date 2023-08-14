@@ -9,19 +9,21 @@ class BaseModel:
     def __init__(self, opt):
         self.opt = opt
         self.device = 'cuda'
+        self.mo_list = opt.mo_list
         self.img_ID = []
         self.idx_list = []
         self.model_name = []
         self.optimizer_name = []
         self.loss_name = []
         self.visual_name = []
+        self.path_name = []
 
 
     def setup_model(self, opt):
         if opt.phase == 'train' and opt.resume_epoch >= 0:
             self.load_model(opt.resume_epoch)
         elif opt.phase == 'test':
-            self.load_model(opt.load_epoch)
+            self.load_model(opt.load_epoch, aff_tag=opt.aff_tag)
         self.print_model()
 
 
@@ -37,28 +39,65 @@ class BaseModel:
         print('------------------------------------------------------------------')
 
 
-    def load_model(self, epoch):
+    def load_model(self, epoch, aff_tag=None):
         for name in self.model_name:
             if isinstance(name, str):
-                load_filename = '{:0>3d}_net_{}.pth'.format(epoch, name)
-                load_path = os.path.join(self.opt.checkpoint_root, self.opt.name, 'model', load_filename)
+                if aff_tag is not None:
+                    load_filename = '{}_net_{}.pth'.format(aff_tag, name)
+                else:
+                    load_filename = '{:0>3d}_net_{}.pth'.format(epoch, name)
+                load_path = os.path.join(self.opt.checkpoint_root, self.opt.name,
+                                         '{}'.format(self.opt.reg_folder if self.opt.model == 'reg' else self.opt.seg_folder),
+                                         'model', load_filename)
                 model = getattr(self, 'net_' + name)
                 if isinstance(model, torch.nn.DataParallel):
                     model = model.module
                 model.to(self.device)
-                model.load_state_dict(torch.load(load_path))
+
+                optimizer = getattr(self, 'optimizer_' + name)
+
+                checkpoint = torch.load(load_path)
+                model.load_state_dict(checkpoint['model_state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+                # if self.opt.model != 'seg':
+                #     optimizer = getattr(self, 'optimizer_' + name)
+                #
+                #     checkpoint = torch.load(load_path)
+                #     model.load_state_dict(checkpoint['model_state_dict'])
+                #     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                # else:
+                #     model.load_state_dict(torch.load(load_path))
 
 
     def save_model(self, epoch, aff_tag=None):
         for name in self.model_name:
             if isinstance(name, str):
                 if aff_tag is not None:
-                    save_filename = '%s_net_%s.pth' % (str(epoch).join('_') + aff_tag, name)
+                    save_filename = '%s_net_%s.pth' % (aff_tag, name)
                 else:
                     save_filename = '%03d_net_%s.pth' % (epoch, name)
-                save_path = os.path.join(self.opt.checkpoint_root, self.opt.name, 'model', save_filename)
+                save_path = os.path.join(self.opt.checkpoint_root, self.opt.name,
+                                         '{}'.format(self.opt.reg_folder if self.opt.model == 'reg' else self.opt.seg_folder),
+                                         'model', save_filename)
                 model = getattr(self, 'net_' + name)
-                torch.save(model.module.state_dict(), save_path)
+
+                optimizer = getattr(self, 'optimizer_' + name)
+
+                state_dict = {'model_state_dict': model.module.state_dict(),
+                              'optimizer_state_dict': optimizer.state_dict()}
+
+                torch.save(state_dict, save_path)
+
+                # if self.opt.model != 'seg':
+                #     optimizer = getattr(self, 'optimizer_' + name)
+                #
+                #     state_dict = {'model_state_dict': model.module.state_dict(),
+                #                   'optimizer_state_dict': optimizer.state_dict()}
+                #
+                #     torch.save(state_dict, save_path)
+                # else:
+                #     torch.save(model.module.state_dict(), save_path)
 
 
     def train(self):
@@ -121,22 +160,34 @@ class BaseModel:
         return visual_ret
 
 
-    # def calculate_accuracy(self):
-    #     """Print and save accuracy of the trained results"""
-    #     pred = getattr(self, self.output_names + '_output').detach().cpu().numpy()
-    #     label = getattr(self, 'image_label').detach().cpu().numpy()
-    #     accuracy = accuracy_score(label, np.argmax(pred, axis=1), normalize=False)
-    #     return accuracy
+    """
+    def calculate_accuracy(self):
+        #TODO:Print and save accuracy of the trained results
+        pred = getattr(self, self.output_names + '_output').detach().cpu().numpy()
+        label = getattr(self, 'image_label').detach().cpu().numpy()
+        accuracy = accuracy_score(label, np.argmax(pred, axis=1), normalize=False)
+        return accuracy
+    """
 
-
+    """
     def get_image_path(self):
-        """Return image paths."""
+        # TODO:Return image paths.
         keys = list(self.__dict__.keys())
         img_path_dict = dict()
         for i in range(len(keys)):
             if 'path' in keys[i]:
                 img_path_dict[keys[i]] = self.__dict__[keys[i]]
         return img_path_dict
+    """
+
+
+    def get_image_path(self):
+        """Return image paths."""
+        path_ret = OrderedDict()
+        for name in self.path_name:
+            if isinstance(name, str):
+                path_ret[name] = getattr(self, name)
+        return path_ret
 
 
     def get_image_ID(self):
