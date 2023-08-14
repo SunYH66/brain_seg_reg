@@ -4,7 +4,7 @@ import random
 import importlib
 import numpy as np
 from torch.utils.data import DataLoader
-from torch.utils.data.dataset import random_split
+from torch.utils.data.dataset import random_split, Subset
 
 def find_dataset_using_name(dataset_name):
     """
@@ -34,22 +34,21 @@ class CustomDatasetDataLoader:
         self.dataset = dataset_class(opt)
         if opt.phase == 'train':
             print('dataset [%s] was created' % type(self.dataset).__name__)
-            train_size = int(0.9 * len(self.dataset))
-            val_size = len(self.dataset) - train_size
-            self.train_dataset, self.val_dataset = random_split(self.dataset, [train_size, val_size])
+            self.val_dataset = Subset(self.dataset, range(0, 12))
+            self.train_dataset = Subset(self.dataset, range(12, len(self.dataset)))
 
             self.train_loader = DataLoader(
                 self.train_dataset,
                 batch_size=opt.batch_size,
                 shuffle=True,
-                num_workers=2,
+                num_workers=opt.num_workers,
                 drop_last=True
             )
             self.val_loader = DataLoader(
                 self.val_dataset,
                 batch_size=opt.batch_size,
-                shuffle=True,
-                num_workers=2,
+                shuffle=False,
+                num_workers=opt.num_workers,
                 drop_last=True
             )
         elif opt.phase == 'test':
@@ -78,6 +77,10 @@ def random_sample(img, patch_size):
     :param patch_size: crop size of extracted patch
     :return: random cropped image patch with exact size
     """
+    # transer tensor datatype to ndarray
+    if isinstance(img, torch.Tensor):
+        img = img.detach().cpu().numpy()
+
     # get maximum index and random get selected data
     max_pos = img.shape[2:]
 
@@ -108,10 +111,14 @@ def mask_sample(img, patch_size):
     :param patch_size: crop size of extracted patch
     :return: cropped image by mask and exact size
     """
+    # transer tensor datatype to ndarray
+    if isinstance(img, torch.Tensor):
+        img = img.detach().cpu().numpy()
+
     max_pos = img.shape[2:]
 
     # get potential exists center point within mask area
-    index = np.where(img[3:, ...] != 0)[2:]
+    index = np.where(img[0:2, ...] != 0)[2:]
     index = list(map(list, zip(*index)))
 
     # select center point randomly from mask region
