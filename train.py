@@ -1,16 +1,16 @@
 # --coding:utf-8--
-import os
+import sys
 import time
-import shutil
 import argparse
 from tqdm import tqdm
+sys.path.append('..')
 
-from data import create_dataset
-from model import create_model
-from config.config import cfg
-from config import print_configs
-from utils.utils import save_image
-from utils.visualizer import Visualizer
+from brain_reg_seg.data import create_dataset
+from brain_reg_seg.model import create_model
+from brain_reg_seg.config.config import cfg
+from brain_reg_seg.config import print_configs
+from brain_reg_seg.utils.visualizer import Visualizer
+from brain_reg_seg.utils.utils import save_image, save_resluts, save_best_val, check_val_folder
 
 
 if __name__ == '__main__':
@@ -21,11 +21,11 @@ if __name__ == '__main__':
     arg = parser.parse_args()
 
     if arg.platform == 'local':
-        cfg.data_root = '/data/infant_brain_seg_reg/'
+        cfg.data_root = '/data/brain_reg_seg/'
         cfg.batch_size = 1
         cfg.num_workers = 2
     elif arg.platform == 'server':
-        cfg.data_root = '/public_bme/home/sunyh/data/infant_brain_seg_reg'
+        cfg.data_root = '/public_bme/home/sunyh/data/brain_reg_seg/'
         cfg.batch_size = 3
         cfg.num_workers = 3
 
@@ -33,6 +33,7 @@ if __name__ == '__main__':
     print_configs(cfg)
 
     # setup dataset, model and visualizer
+    current_best_dice = 0
     dataset = create_dataset(cfg)
     model = create_model(cfg)
     model.setup_model(cfg)
@@ -58,15 +59,19 @@ if __name__ == '__main__':
 
             # run the validation
             if (epoch * iter_num + i) % cfg.val_frequency == 0:
+
                 model.eval()
                 cfg.phase = 'val'
-                if os.path.exists(os.path.join(cfg.checkpoint_root, cfg.name, 'val')):
-                    shutil.rmtree(os.path.join(cfg.checkpoint_root, cfg.name, 'val'))
+                check_val_folder(cfg)
+
                 for j, val_data in enumerate(dataset.val_loader):
                     model.set_input(val_data)
                     model.optimize_val_parameters(cfg)
+                    # save_resluts(model.get_current_visuals(), model, cfg)
                     save_image(model.get_current_visuals(), cfg, model.get_image_path())
                     visualizer.display_current_loss(model.get_current_loss(), epoch * iter_num + i, '_val')
+
+                # current_best_dice = save_best_val(cfg, current_best_dice, model, epoch)
 
             # save the model
             if epoch % cfg.save_frequency == 0:
@@ -75,4 +80,5 @@ if __name__ == '__main__':
         # update the learning rate
         model.update_learning_rate(cfg)
 
+        visualizer.print_current_loss(model.get_current_loss(), epoch)
         print('Training took time %.2f minutes for one epoch.' % ((time.time() - start_time) / 60))

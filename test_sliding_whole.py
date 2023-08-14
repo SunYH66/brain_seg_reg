@@ -23,11 +23,11 @@ if __name__ == '__main__':
     arg = parser.parse_args()
 
     if arg.platform == 'local':
-        cfg.data_root = '/data/infant_brain_seg_reg/'
+        cfg.data_root = '/data/brain_reg_seg/'
         cfg.batch_size = 1
         cfg.num_workers = 2
     elif arg.platform == 'server':
-        cfg.data_root = '/public_bme/home/sunyh/data/infant_brain_seg_reg'
+        cfg.data_root = '/public/bme/home/v-sunyh2/data/brain_reg_seg'
         cfg.batch_size = 3
         cfg.num_workers = 3
 
@@ -41,7 +41,7 @@ if __name__ == '__main__':
     model.setup_model(cfg)
 
     # remove existing fold for recording results and establist a new one
-    csv_root = os.path.join(cfg.checkpoint_root, cfg.name, 'test')
+    csv_root = os.path.join(cfg.checkpoint_root, cfg.name, cfg.test_folder)
     if os.path.exists(csv_root):
         shutil.rmtree(csv_root)
 
@@ -66,14 +66,10 @@ if __name__ == '__main__':
 
         # start to inference
         with torch.no_grad(): # no gradients to accelerate
-            # obtain seg net output
-            model.seg_output = inferer(torch.cat((model.img_06, model.img_12,
-                                            model.img_24), dim=0), model.net_seg)
-
             # set reg net input
-            model.fix_seg_06 = model.seg_output[0: cfg.batch_size, ...].float()
-            model.mov_seg_12 = model.seg_output[cfg.batch_size: 2 * cfg.batch_size, ...].float()
-            model.mov_seg_24 = model.seg_output[2 * cfg.batch_size: 3 * cfg.batch_size, ...].float()
+            model.fix_seg_06 = model.seg_06
+            model.mov_seg_12 = model.seg_12
+            model.mov_seg_24 = model.seg_24
             model.fix_seg = torch.cat((model.fix_seg_06, model.fix_seg_06), dim=0)
             model.mov_seg = torch.cat((model.mov_seg_12, model.mov_seg_24), dim=0)
             model.mov_ori = torch.cat((model.img_12, model.img_24), dim=0)
@@ -83,6 +79,9 @@ if __name__ == '__main__':
 
             # apply deformaton field to ori image
             model.warped_ori = spa_tra(model.mov_ori, model.flow)
+
+            # obtain seg net output
+            model.seg_output = inferer(torch.cat((model.img_06, model.warped_ori), dim=0), model.net_seg)
 
             # transfer results to one-channel results
             model.seg_output = model.seg_output.argmax(1).unsqueeze(1) # (B, 1, H, W, D)

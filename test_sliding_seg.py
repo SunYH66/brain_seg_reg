@@ -22,11 +22,11 @@ if __name__ == '__main__':
     arg = parser.parse_args()
 
     if arg.platform == 'local':
-        cfg.data_root = '/data/infant_brain_seg_reg/'
+        cfg.data_root = '/data/brain_reg_seg/'
         cfg.batch_size = 1
         cfg.num_workers = 2
     elif arg.platform == 'server':
-        cfg.data_root = '/public_bme/home/sunyh/data/infant_brain_seg_reg'
+        cfg.data_root = '/public/bme/home/v-sunyh2/data/brain_reg_seg'
         cfg.batch_size = 3
         cfg.num_workers = 3
 
@@ -34,85 +34,295 @@ if __name__ == '__main__':
     cfg.phase = 'test'
     cfg.batch_size = 1
 
-    # create dataset and model
-    dataset = create_dataset(cfg)
+    # create model
     model = create_model(cfg)
     model.setup_model(cfg)
 
     # remove existing fold for recording results and establist a new one
-    csv_root = os.path.join(cfg.checkpoint_root, cfg.name, 'test')
+    csv_root = os.path.join(cfg.checkpoint_root, cfg.name, cfg.seg_folder, cfg.test_folder)
     if os.path.exists(csv_root):
         shutil.rmtree(csv_root)
 
     # inference loop
-    rec_seg = list()
+    rec_seg_06 = list()
+    rec_seg_12 = list()
+    rec_seg_24 = list()
 
-    for i, data in enumerate(dataset.test_loader):
-        model.set_input(data)
-        model.eval()
-        start_time = time.time()
+    # ===============================================================================================================================
+    # set seg net input and set path for 06 seg
+    # ===============================================================================================================================
 
-        # define sliding window inference object
-        inferer = SlidingWindowInferer(cfg.crop_size, overlap=0.25)
+    # setup dataset for 06 month
+    if cfg.mo_list == [6, 12, 24]:
 
-        # start to inference
-        with torch.no_grad(): # no gradients to accelerate
+        dataset = create_dataset(cfg)
 
-            # obtain seg net output
-            # TODO: Change when test different months
-            model.seg_output = inferer(model.img_24, model.net_seg)
+        for i, data in enumerate(dataset.test_loader):
+            model.set_input(data)
+            model.eval()
+            start_time = time.time()
 
-            # transfer results to one-channel results
-            model.seg_output = model.seg_output.argmax(1).unsqueeze(1) # (B, 1, H, W, D)
+            # define sliding window inference object
+            inferer = SlidingWindowInferer(cfg.crop_size, sw_batch_size=3, overlap=0.25)
 
-            # save seg net output
-            save_image(model.seg_output, cfg, model.get_image_path(), label='seg_output')
+            # start to inference
+            with torch.no_grad(): # no gradients to accelerate
+                # obtain seg net output
+                model.seg_output = inferer(torch.cat((model.img_main, model.warped_ori_help_1, model.warped_ori_help_2),
+                                                      dim=1), model.net_seg)
+                # model.seg_output = model.net_seg(torch.cat((model.img_main, model.warped_ori_help_1, model.warped_ori_help_2),
+                #                                       dim=1))
+                # transfer results to one-channel results
+                model.seg_output = model.seg_output[0]
+                model.seg_output= model.seg_output.argmax(1).unsqueeze(1) # (B, 1, H, W, D)
 
-            # set data format to calculate dice
-            # TODO: Change when test different months
-            seg_output = model.seg_output.cpu().numpy() # (B, C, H, W, D) = (1, 1, 256, 256, 256)
-            seg_GT = model.seg_24.cpu().numpy() # (B, C, H, W, D) = (1, 1, 256, 256, 256)
+                # save seg net output
+                save_image(model.seg_output, cfg, model.get_image_path(), label='seg_output')
+
+                # set data format to calculate dice
+                seg_output = model.seg_output.cpu().numpy() # (B, C, H, W, D) = (3, 1, 256, 256, 256)
+                seg_GT = torch.cat((model.seg_main, model.warped_seg_help_1, model.warped_seg_help_2), dim=0).cpu().numpy() # (B, C, H, W, D) = (3, 1, 256, 256, 256)
+
+                # save the segmentation results (dice, hd) to a csv file
+                # =======================================segmentation results===============================================
+                for k in range(seg_output.shape[0]):
+                    # Dice
+                    dice_csf, dice_gm, dice_wm = multi_layer_dice_coefficient(seg_output[k, ...].squeeze(), seg_GT[k, ...].squeeze())
+
+                    # ASD and HD
+                    csf_surface_distance = metrics.compute_surface_distances(seg_GT[k, ...].squeeze() == 1,
+                                                                             seg_output[k, ...].squeeze() == 1,
+                                                                             spacing_mm=[1, 1, 1])
+                    gm_surface_distance = metrics.compute_surface_distances(seg_GT[k, ...].squeeze() == 2,
+                                                                            seg_output[k, ...].squeeze() == 2,
+                                                                            spacing_mm=[1, 1, 1])
+                    wm_surface_distance = metrics.compute_surface_distances(seg_GT[k, ...].squeeze() == 3,
+                                                                            seg_output[k, ...].squeeze() == 3,
+                                                                            spacing_mm=[1, 1, 1])
+
+                    csf_ASD = metrics.compute_average_surface_distance(csf_surface_distance)
+                    gm_ASD = metrics.compute_average_surface_distance(gm_surface_distance)
+                    wm_ASD = metrics.compute_average_surface_distance(wm_surface_distance)
+
+                    csf_HD = metrics.compute_robust_hausdorff(csf_surface_distance, 99)
+                    gm_HD = metrics.compute_robust_hausdorff(gm_surface_distance, 99)
+                    wm_HD = metrics.compute_robust_hausdorff(wm_surface_distance, 99)
+
+                    img_ID = model.get_image_path()
+                    img_ID = img_ID['img_path_main'][0].split('/')[-2]
+                    print(img_ID)
+                    if k == 0:
+                        print('06_seg', dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD)
+                        rec_seg_06.append([img_ID, dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD])
+                    if k == 1:
+                        print('12_seg', dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD)
+                        rec_seg_12.append([img_ID, dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD])
+                    if k == 2:
+                        print('24_seg', dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD)
+                        rec_seg_24.append([img_ID, dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD])
 
 
-            # save the segmentation results (dice, hd) to a csv file
-            # =======================================segmentation results===============================================
-            for k in range(seg_output.shape[0]):
-                # Dice
-                dice_csf, dice_gm, dice_wm = multi_layer_dice_coefficient(seg_output[k, ...].squeeze(), seg_GT[k, ...].squeeze())
-
-                # ASD and HD
-                csf_surface_distance = metrics.compute_surface_distances(seg_GT[k, ...].squeeze() == 1,
-                                                                         seg_output[k, ...].squeeze() == 1,
-                                                                         spacing_mm=[1, 1, 1])
-                gm_surface_distance = metrics.compute_surface_distances(seg_GT[k, ...].squeeze() == 2,
-                                                                        seg_output[k, ...].squeeze() == 2,
-                                                                        spacing_mm=[1, 1, 1])
-                wm_surface_distance = metrics.compute_surface_distances(seg_GT[k, ...].squeeze() == 3,
-                                                                        seg_output[k, ...].squeeze() == 3,
-                                                                        spacing_mm=[1, 1, 1])
-
-                csf_ASD = metrics.compute_average_surface_distance(csf_surface_distance)
-                gm_ASD = metrics.compute_average_surface_distance(gm_surface_distance)
-                wm_ASD = metrics.compute_average_surface_distance(wm_surface_distance)
-
-                csf_HD = metrics.compute_robust_hausdorff(csf_surface_distance, 99)
-                gm_HD = metrics.compute_robust_hausdorff(gm_surface_distance, 99)
-                wm_HD = metrics.compute_robust_hausdorff(wm_surface_distance, 99)
-
-                img_ID = model.get_image_path()
-                img_ID = img_ID['img_06_path'][0].split('/')[-2]
-
-                if k == 0:
-                    print('Seg_results:', dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD)
-                    rec_seg.append([img_ID, dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD])
+            print('Using time %.2f min for one batch.' % ((time.time() - start_time) / 60))
+            print('-------------------------------------------------------------------------------------------------------------------------')
 
 
-        print('Using time %.2f min for one batch.' % ((time.time() - start_time) / 60))
-        print('-------------------------------------------------------------------------------------------------------------------------')
+            if rec_seg_06 is not None:
+                df = pd.DataFrame(rec_seg_06, columns=['ID', 'Dice_csf', 'Dice_gm', 'Dice_wm',
+                                                       'csf_ASD', 'gm_ASD', 'wm_ASD', 'csf_HD', 'gm_HD', 'wm_HD'])
+                df.to_csv(os.path.join(csv_root, 'rec_seg_06.csv'), index=False)
+            if rec_seg_12 is not None:
+                df = pd.DataFrame(rec_seg_12, columns=['ID', 'Dice_csf', 'Dice_gm', 'Dice_wm',
+                                                       'csf_ASD', 'gm_ASD', 'wm_ASD', 'csf_HD', 'gm_HD', 'wm_HD'])
+                df.to_csv(os.path.join(csv_root, 'rec_seg_12.csv'), index=False)
+            if rec_seg_24 is not None:
+                df = pd.DataFrame(rec_seg_24, columns=['ID', 'Dice_csf', 'Dice_gm', 'Dice_wm',
+                                                       'csf_ASD', 'gm_ASD', 'wm_ASD', 'csf_HD', 'gm_HD', 'wm_HD'])
+                df.to_csv(os.path.join(csv_root, 'rec_seg_24.csv'), index=False)
 
 
-        if rec_seg is not None:
-            df = pd.DataFrame(rec_seg, columns=['ID', 'Dice_csf', 'Dice_gm', 'Dice_wm',
-                                                   'csf_ASD', 'gm_ASD', 'wm_ASD', 'csf_HD', 'gm_HD', 'wm_HD'])
-            # TODO: change csv file name for different months
-            df.to_csv(os.path.join(csv_root, 'rec_seg_24.csv'), index=False)
+    # ===============================================================================================================================
+    # set seg net input and set path for 12 seg
+    # ===============================================================================================================================
+
+    # setup dataset for 12 month
+    if cfg.mo_list == [12, 6, 24]:
+
+        dataset = create_dataset(cfg)
+
+        for i, data in enumerate(dataset.test_loader):
+            model.set_input(data)
+            model.eval()
+            start_time = time.time()
+
+            # define sliding window inference object
+            inferer = SlidingWindowInferer(cfg.crop_size, sw_batch_size=3, overlap=0.25)
+
+            # start to inference
+            with torch.no_grad(): # no gradients to accelerate
+
+                # obtain seg net output
+                # model.seg_output = inferer(torch.cat((model.img_main, model.warped_ori_help_1, model.warped_ori_help_2),
+                #                                       dim=1), model.net_seg)
+                model.seg_output = model.net_seg(torch.cat((model.img_main, model.warped_ori_help_1, model.warped_ori_help_2),
+                              dim=1))
+                # transfer results to one-channel results
+                model.seg_output = model.seg_output[0]
+                model.seg_output= model.seg_output.argmax(1).unsqueeze(1) # (B, 1, H, W, D)
+
+                # save seg net output
+                save_image(model.seg_output, cfg, model.get_image_path(), label='seg_output')
+
+                # set data format to calculate dice
+                seg_output = model.seg_output.cpu().numpy() # (B, C, H, W, D) = (3, 1, 256, 256, 256)
+                seg_GT = torch.cat((model.seg_main, model.warped_seg_help_1, model.warped_seg_help_2), dim=0).cpu().numpy() # (B, C, H, W, D) = (3, 1, 256, 256, 256)
+
+                # save the segmentation results (dice, hd) to a csv file
+                # =======================================segmentation results===============================================
+                for k in range(seg_output.shape[0]):
+                    # Dice
+                    dice_csf, dice_gm, dice_wm = multi_layer_dice_coefficient(seg_output[k, ...].squeeze(), seg_GT[k, ...].squeeze())
+
+                    # ASD and HD
+                    csf_surface_distance = metrics.compute_surface_distances(seg_GT[k, ...].squeeze() == 1,
+                                                                             seg_output[k, ...].squeeze() == 1,
+                                                                             spacing_mm=[1, 1, 1])
+                    gm_surface_distance = metrics.compute_surface_distances(seg_GT[k, ...].squeeze() == 2,
+                                                                            seg_output[k, ...].squeeze() == 2,
+                                                                            spacing_mm=[1, 1, 1])
+                    wm_surface_distance = metrics.compute_surface_distances(seg_GT[k, ...].squeeze() == 3,
+                                                                            seg_output[k, ...].squeeze() == 3,
+                                                                            spacing_mm=[1, 1, 1])
+
+                    csf_ASD = metrics.compute_average_surface_distance(csf_surface_distance)
+                    gm_ASD = metrics.compute_average_surface_distance(gm_surface_distance)
+                    wm_ASD = metrics.compute_average_surface_distance(wm_surface_distance)
+
+                    csf_HD = metrics.compute_robust_hausdorff(csf_surface_distance, 99)
+                    gm_HD = metrics.compute_robust_hausdorff(gm_surface_distance, 99)
+                    wm_HD = metrics.compute_robust_hausdorff(wm_surface_distance, 99)
+
+                    img_ID = model.get_image_path()
+                    img_ID = img_ID['img_path_main'][0].split('/')[-2]
+                    print(img_ID)
+
+                    if k == 0:
+                        print('12_seg', dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD)
+                        rec_seg_12.append([img_ID, dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD])
+                    if k == 1:
+                        print('06_seg', dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD)
+                        rec_seg_06.append([img_ID, dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD])
+                    if k == 2:
+                        print('24_seg', dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD)
+                        rec_seg_24.append([img_ID, dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD])
+
+
+            print('Using time %.2f min for one batch.' % ((time.time() - start_time) / 60))
+            print('-------------------------------------------------------------------------------------------------------------------------')
+
+
+            if rec_seg_06 is not None:
+                df = pd.DataFrame(rec_seg_06, columns=['ID', 'Dice_csf', 'Dice_gm', 'Dice_wm',
+                                                       'csf_ASD', 'gm_ASD', 'wm_ASD', 'csf_HD', 'gm_HD', 'wm_HD'])
+                df.to_csv(os.path.join(csv_root, 'rec_seg_06.csv'), index=False)
+            if rec_seg_12 is not None:
+                df = pd.DataFrame(rec_seg_12, columns=['ID', 'Dice_csf', 'Dice_gm', 'Dice_wm',
+                                                       'csf_ASD', 'gm_ASD', 'wm_ASD', 'csf_HD', 'gm_HD', 'wm_HD'])
+                df.to_csv(os.path.join(csv_root, 'rec_seg_12.csv'), index=False)
+            if rec_seg_24 is not None:
+                df = pd.DataFrame(rec_seg_24, columns=['ID', 'Dice_csf', 'Dice_gm', 'Dice_wm',
+                                                       'csf_ASD', 'gm_ASD', 'wm_ASD', 'csf_HD', 'gm_HD', 'wm_HD'])
+                df.to_csv(os.path.join(csv_root, 'rec_seg_24.csv'), index=False)
+
+    # ===============================================================================================================================
+    # set seg net input and set path for 24 seg
+    # ===============================================================================================================================
+
+    # setup dataset for 24 month
+    if cfg.mo_list == [24, 6, 12]:
+
+        dataset = create_dataset(cfg)
+
+        for i, data in enumerate(dataset.test_loader):
+            model.set_input(data)
+            model.eval()
+            start_time = time.time()
+
+            # define sliding window inference object
+            inferer = SlidingWindowInferer(cfg.crop_size, sw_batch_size=3, overlap=0.25)
+
+            # start to inference
+            with torch.no_grad(): # no gradients to accelerate
+
+                # obtain seg net output
+                # model.seg_output = inferer(torch.cat((model.img_main, model.warped_ori_help_1, model.warped_ori_help_2),
+                #                                       dim=1), model.net_seg)
+                model.seg_output = model.seg_output[0]
+                model.seg_output = model.net_seg(torch.cat((model.img_main, model.warped_ori_help_1, model.warped_ori_help_2),
+                                                      dim=1))
+
+                # transfer results to one-channel results
+                model.seg_output= model.seg_output.argmax(1).unsqueeze(1) # (B, 1, H, W, D)
+
+                # save seg net output
+                save_image(model.seg_output, cfg, model.get_image_path(), label='seg_output')
+
+                # set data format to calculate dice
+                seg_output = model.seg_output.cpu().numpy() # (B, C, H, W, D) = (3, 1, 256, 256, 256)
+                seg_GT = torch.cat((model.seg_main, model.warped_seg_help_1, model.warped_seg_help_2), dim=0).cpu().numpy() # (B, C, H, W, D) = (3, 1, 256, 256, 256)
+
+                # save the segmentation results (dice, hd) to a csv file
+                # =======================================segmentation results===============================================
+                for k in range(seg_output.shape[0]):
+                    # Dice
+                    dice_csf, dice_gm, dice_wm = multi_layer_dice_coefficient(seg_output[k, ...].squeeze(), seg_GT[k, ...].squeeze())
+
+                    # ASD and HD
+                    csf_surface_distance = metrics.compute_surface_distances(seg_GT[k, ...].squeeze() == 1,
+                                                                             seg_output[k, ...].squeeze() == 1,
+                                                                             spacing_mm=[1, 1, 1])
+                    gm_surface_distance = metrics.compute_surface_distances(seg_GT[k, ...].squeeze() == 2,
+                                                                            seg_output[k, ...].squeeze() == 2,
+                                                                            spacing_mm=[1, 1, 1])
+                    wm_surface_distance = metrics.compute_surface_distances(seg_GT[k, ...].squeeze() == 3,
+                                                                            seg_output[k, ...].squeeze() == 3,
+                                                                            spacing_mm=[1, 1, 1])
+
+                    csf_ASD = metrics.compute_average_surface_distance(csf_surface_distance)
+                    gm_ASD = metrics.compute_average_surface_distance(gm_surface_distance)
+                    wm_ASD = metrics.compute_average_surface_distance(wm_surface_distance)
+
+                    csf_HD = metrics.compute_robust_hausdorff(csf_surface_distance, 99)
+                    gm_HD = metrics.compute_robust_hausdorff(gm_surface_distance, 99)
+                    wm_HD = metrics.compute_robust_hausdorff(wm_surface_distance, 99)
+
+                    img_ID = model.get_image_path()
+                    img_ID = img_ID['img_path_main'][0].split('/')[-2]
+                    print(img_ID)
+
+                    if k == 0:
+                        print('24_seg', dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD)
+                        rec_seg_24.append([img_ID, dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD])
+                    if k == 1:
+                        print('06_seg', dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD)
+                        rec_seg_06.append([img_ID, dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD])
+                    if k == 2:
+                        print('12_seg', dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD)
+                        rec_seg_12.append([img_ID, dice_csf, dice_gm, dice_wm, csf_ASD, gm_ASD, wm_ASD, csf_HD, gm_HD, wm_HD])
+
+
+            print('Using time %.2f min for one batch.' % ((time.time() - start_time) / 60))
+            print('-------------------------------------------------------------------------------------------------------------------------')
+
+
+            if rec_seg_06 is not None:
+                df = pd.DataFrame(rec_seg_06, columns=['ID', 'Dice_csf', 'Dice_gm', 'Dice_wm',
+                                                       'csf_ASD', 'gm_ASD', 'wm_ASD', 'csf_HD', 'gm_HD', 'wm_HD'])
+                df.to_csv(os.path.join(csv_root, 'rec_seg_06.csv'), index=False)
+            if rec_seg_12 is not None:
+                df = pd.DataFrame(rec_seg_12, columns=['ID', 'Dice_csf', 'Dice_gm', 'Dice_wm',
+                                                       'csf_ASD', 'gm_ASD', 'wm_ASD', 'csf_HD', 'gm_HD', 'wm_HD'])
+                df.to_csv(os.path.join(csv_root, 'rec_seg_12.csv'), index=False)
+            if rec_seg_24 is not None:
+                df = pd.DataFrame(rec_seg_24, columns=['ID', 'Dice_csf', 'Dice_gm', 'Dice_wm',
+                                                       'csf_ASD', 'gm_ASD', 'wm_ASD', 'csf_HD', 'gm_HD', 'wm_HD'])
+                df.to_csv(os.path.join(csv_root, 'rec_seg_24.csv'), index=False)

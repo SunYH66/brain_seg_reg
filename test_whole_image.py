@@ -22,11 +22,11 @@ if __name__ == '__main__':
     arg = parser.parse_args()
 
     if arg.platform == 'local':
-        cfg.data_root = '/data/infant_brain_seg_reg/'
+        cfg.data_root = '/data/brain_reg_seg/'
         cfg.batch_size = 1
         cfg.num_workers = 2
     elif arg.platform == 'server':
-        cfg.data_root = '/public_bme/home/sunyh/data/infant_brain_seg_reg'
+        cfg.data_root = '/public/bme/home/v-sunyh2/data/brain_reg_seg'
         cfg.batch_size = 3
         cfg.num_workers = 3
 
