@@ -6,6 +6,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 
+def to_one_hot(image):
+    """Convert the segmentation map (tensor) to the one-hot format."""
+    num_classes = int(image.max()+1)
+    image_one_hot = torch.eye(num_classes)[image.squeeze(1).long()]
+    image_one_hot = image_one_hot.permute(0, 4, 1, 2, 3).float()
+    image_one_hot = image_one_hot.type(image.type())
+
+    return image_one_hot
 
 class gradient_loss(nn.Module):
     def __init__(self):
@@ -76,11 +84,11 @@ class ThreeDiceLoss(nn.Module):
             dice coefficient: the average 2 * class intersection over cardinality value
             for multi-class image segmentation
         """
-        num_classes = 4 # inputs_1.size(1)
+        num_classes = int(targets.max()+1) # TODO: inputs.size(1)
         true_1_hot = torch.eye(num_classes)[targets.squeeze(1).long()]
-
         true_1_hot = true_1_hot.permute(0, 4, 1, 2, 3).float()
         true_1_hot = true_1_hot.type(inputs_1.type())
+
         dims = (0,) + tuple(range(2, true_1_hot.ndimension()))
         intersection = torch.sum(inputs_1 * inputs_2 * true_1_hot, dims)
         cardinality = torch.sum(inputs_1 + inputs_2 + true_1_hot, dims)
